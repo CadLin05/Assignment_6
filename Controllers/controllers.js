@@ -1,92 +1,134 @@
 
 import {highscores} from "../Data/highscores.js";
+import pool from './connections.js';
+import { hashPassword } from "../Controllers/passwords.js";
 
-//quick sort 
-function sort(){
-    highscores.sort((a, b) => b.score - a.score);
-}
 
-//adds to array
-function addScore(username, score){
-    highscores.push({ username, score});
-    sort();
+//MYSQL
+
+//FOR GET ROUTE WITH PAGINATION
+
+export const getAllHighscoresWithPagintation = async (search, skip, limit) => {
+    const searchTerm = `%${search || ""}%`;
+
+    const safeSkip = parseInt(skip) || 0;
+    const safeLimit = parseInt(limit) || 10;
+
+    const query = `SELECT highscores.id AS highscoreId, users.username, highscores.score FROM highscores JOIN users ON highscores.userId = users.id WHERE users.username LIKE ? ORDER BY highscores.score ASC LIMIT ${safeLimit} OFFSET ${safeSkip}`;
+
+    const [data] = await pool.execute(query, [searchTerm]);
+
+    return data;
 };
 
-//if it should add or update the list
-function add_update(username, score){
-    const num = Number(score);
-    let found = false;
+export const getTotalUserForSearch = async (search) => {
+    const searchTerm = `%${search || ""}%`;
 
+    const query = `SELECT COUNT(*) AS total FROM users WHERE username LIKE ?`;
 
-    for (let i = 0; i < highscores.length; i++){
-        if (highscores[i].username === username){
-            found = true;
-            if (num > highscores[i].score){
-                highscores[i].score = num;
-                break;
-            };
-        };
-    };
-    //eusing this instead of else also avoids duplicates
-    if (!found){
-        addScore(username, score = num);
-    };
-    sort();
-    return highscores.slice();
+    const data = await pool.execute(query, [searchTerm]);
 
-    /* originally tried for loop found this avoids duplicates but went back to for loop
-    const trim_user = username.trim();
-    const score_exist = highscores.find(h => h.username === trim_user);
-    if(score_exist){
-        if(num > score_exist.score){
-            score_exist.score = num;
-        }
-
-    }else{
-            highscores.push({username: trim_user, score: num});
-        };
-    sort();
-    return highscores.slice(); */
-
-
-    
+    return data[0][0].total || 0;
 };
 
-//returning top highscore
-function top_score() {
-    if (highscores.length === 0){
+//Finding One User
+export const getOneUser = async(username) =>{
+    if(!username){
         return null;
-    };
-    sort();
-    return highscores[0];
+    }
+    const data = await pool.execute(`SELECT highscores.id AS highscoreId, users.username, highscores.score FROM highscores JOIN users ON highscores.userId = users.id WHERE users.username LIKE ?`, [username]);
+    return data[0][0] || null;
+    //const data = await pool.execute(`SELECT * FROM users where username=?`,[username]);
+    
 }
+    //const searchTerm = `%${search || ""}%`;
 
-//returning all highscores
-function all_score(){
-    sort();
-    return highscores.slice();
+export const getUserByUsername = async (username) => {
+    if (!username) return null;
+    const [rows] = await pool.execute(`SELECT * FROM users WHERE username = ?`,[username]);
+    return rows[0] || null;
 };
 
-//express updating and creating
-const saveScore = ({username, score})=>{
-    if(username && username.trim() != ''){
-        return add_update(username, score);
+export const updationByUsername = async(username, score) => {
+    const data = await pool.execute(`INSERT INTO highscores(userId, score) VALUES((SELECT id FROM users WHERE username = ?), ?) ON DUPLICATE KEY UPDATE score = GREATEST(score, VALUES(score))`, [username, score]);
+    if(data[0].affectedRows > 0){
+        return true;
+    }else{
+        return false;
     }
 };
-
-//express to delete
-const removeScore = (username) => {
-    let removed = null;
-    //looping over array
-    for(let i = 0; i < highscores.length; i++){
-        //finding if username exists
-        if(highscores[i].username == username){
-            removed = highscores[i]
-            highscores.splice(i,1);
-            break;
-        }
+/*
+export const deleteByUsername = async(username) =>{
+    const exists = await getUserByUsername(username);
+    if(!exists) return null;
+    //const [id] = await pool.execute(`SELECT id FROM users WHERE username = ?`, [username]);
+    //const userId = id[0].id;
+    userId = exists.id;
+    const data = await pool.execute(`DELETE FROM highscores WHERE userId = ?`, [userId]); 
+    if(data[0].affectedRows > 0){
+        return true;
+    }else{
+        return false;
     }
-    return removed;
-}
+};*/
+export const deleteByUsername = async(username) =>{
+    const exists = await getUserByUsername(username);
+    
+    console.log("USERNAME SENT TO GETUSERBYUSERNAME:", username);
+    console.log("EXISTS RESULT:", exists);
 
-export default {all_score, top_score, add_update, addScore, saveScore, removeScore};
+    if(!exists) return null;
+
+    const userId = exists.id;
+
+    const [result] = await pool.execute(
+        `DELETE FROM highscores WHERE userId = ?`, 
+        [userId]
+    );
+
+    return result.affectedRows > 0;
+};
+
+//user registration
+export const registerUser = async (username,password) => {
+    const hashedPassword = await hashPassword(password);
+
+    const data = await pool.execute(`INSERT INTO users(username,password,level) VALUES(?,?,?)`,[username,hashedPassword,"NORMAL"]);
+
+    if(data[0].affectedRows > 0){
+        return true;
+    }else{
+        return false;
+    }
+};
+// login register helper
+
+
+//scrapped functions
+    
+// creation/ updation
+/** 
+export const updation = async(username, score) => {
+   
+    const data = await pool.execute(`INSERT INTO highscores(userId, score) VALUES(?,?) ON DUPLICATE KEY UPDATE score = GREATEST(score, VALUES(score))`);
+    if(data[0].affectedRows > 0){
+        return true;
+    }else{
+        return false;
+    }
+
+};
+
+export const createScore = async(username, score) =>{
+    let newScore = null;
+    const data = await pool.execute(`INSERT INTO highscores(userId, score) VALUES (?, ?)`,[userId,score]);
+    if(data[0].affectedRows > 0){
+        newScore = await getOneUser(data[0].insertId);
+    }
+}
+export const updateScore = async(username, score) => {
+    const exists = await getOneUser(username);
+    if(exists){
+       
+    }
+}*/

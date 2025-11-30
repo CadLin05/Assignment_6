@@ -1,67 +1,71 @@
 import { Router } from 'express';
-import controllers from '../Controllers/controllers.js';
-//import { skip } from 'node:test';
-import {highscores} from '../Data/highscores.js';
+import { deleteByUsername, getAllHighscoresWithPagintation, getOneUser, getUserByUsername, registerUser, updationByUsername } from '../Controllers/controllers.js';
+import { authenticate, editor, admin } from '../middleware/authentication.js';
+import { validatePassword, verifyPassword } from '../Controllers/passwords.js';
+import { generatejwt } from '../Utils/jwt.js';
 const router = Router();
 
 
 //get all highscores and stuff with pagination
 //this might not work so prepare to debug
 
-router.get("/", (req, res) =>{
-    const skip = parseInt(req.query.skip) || 0;
-    const limit = parseInt(req.query.limit) || highscores.length;
-    const scores = controllers.all_score();
-    const paginated_scores = scores.slice(skip, skip + limit);
+
+//MYSQL GET ROUTE
+router.get("/", async(req, res) =>{
+    const search = req.query.search || "";
+    const skip = parseInt(req.query.skip) || 5;
+    const limit = parseInt(req.query.limit) || 2;
+
+    const highscores = await getAllHighscoresWithPagintation(search,skip,limit);
     
-    console.log("Skip:", skip, "Limit:", limit);
-    console.log("Returning:", paginated_scores);
-
-    console.log(typeof req.query.skip, req.query.skip);
-    res.json(paginated_scores);
+    res.json({highscores});
+    /*The GET route should return the following information for all existing highscores:
+            { highscoreId, username, score }
+ Anyone should be able to send a request to this GET route
+  and recieve all the highscore data, no authentication required*/
 });
 
-//returning specific highscore
-router.get("/username", (req, res) =>{
-    const username = req.query.username;
-    const scores = controllers.all_score()
-    const single_score = scores.find(u => u.username === username);
-
-    if (!single_score){
-        return res.status(404).send("User not found");
-    }
-    //res.json({ username: single_score.username, score: single_score.score});
-    res.json(single_score)
+//Get One User
+router.get("/username",authenticate, editor, async(req,res)=>{
+    const search = req.query.search || "";
+    const user = await getOneUser(search);
+    res.json({user});
 });
 
-//post to create and update
+//Creation and Updation
 
-router.post("/save", (req, res) =>{
-     const highscore = {
-        username: req.body.username,
-        score: parseInt(req.body.score),
-    };
-    console.log("body: ", req.body.id);
-    console.log(highscore);
-    const saved = controllers.saveScore(highscore);
-    if(saved){
-        res.json(saved);
-    }else{
-        res.status(500).send(`Something went wrong when updating/creating a score`)
+router.post("/insert", authenticate, editor, async(req,res)=>{
+    const username = req.body.username || null;
+    const score = Number(req.body.score) || null;
+
+    if(username && score){
+        const exist = await getUserByUsername(username);
+        if(exist){
+            const createOrupdate = await updationByUsername (username, score);
+            if(createOrupdate){
+                res.status(200).send(`Score for ${username} updated/created successfully.`);
+            }else{
+                res.status(500).send('Something went wrong when updating/creating a score');
+            }
+        }else{
+            res.status(404).send('No user found');
+        }
     }
 });
 
-//delete
 
-router.delete("/delete", (req,res)=>{
-    const username = req.query.username;
-    const removed = controllers.removeScore(username);
-
+//highscore deletion
+router.delete("/delete/:username", authenticate, admin, async(req,res)=>{
+    const username = req.params.username || null;
+    const removed = await deleteByUsername(username);
     if(removed){
         res.json(removed);
     }else{
-        res.status(400).send('That person might not exist')
+        res.status(400).send(`That person with username: ${username} was not found`);
     }
-
 });
+
+
 export default router;
+
+
